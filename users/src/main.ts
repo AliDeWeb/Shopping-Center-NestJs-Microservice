@@ -1,17 +1,21 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
+  const appContext = await NestFactory.createApplicationContext(AppModule);
+  const configService = appContext.get<ConfigService>(ConfigService);
+
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     AppModule,
     {
       transport: Transport.RMQ,
       options: {
-        urls: [],
+        urls: configService.get<string>('RABBITMQ_URLS')?.split(','),
         queue: 'users_queue',
         queueOptions: {
-          durable: true,
+          durable: configService.get<string>('NODE_ENV') === 'production',
         },
       },
     },
