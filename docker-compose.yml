@@ -1,16 +1,35 @@
 services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: 12345678
+      POSTGRES_USER: root
+      POSTGRES_DB: shopping_center
+    networks:
+      - shop-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d shopping_center"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   rabbitmq:
     image: rabbitmq:4.1.1-management-alpine
     container_name: rabbitmq
     restart: always
     ports:
-      - ${RABBITMQ_AMQP_PORT}:5672
-      - ${RABBITMQ_HTTP_PORT}:15672
+      - "5672:5672"
+      - "15672:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
-    env_file:
-      - ./.env
+      RABBITMQ_DEFAULT_USER: root
+      RABBITMQ_DEFAULT_PASS: 12345678
     configs:
       - source: rabbitmq-plugins
         target: /etc/rabbitmq/enabled_plugins
@@ -19,40 +38,48 @@ services:
       - rabbitmq-log:/var/log/rabbitmq
     networks:
       - shop-network
-
-  postgres:
-    image: postgres:15
-    restart: always
-    ports:
-      - ${DB_POSTGRES_PORT}:5432
-    volumes:
-      - /var/postgres/shopping/users:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
-      - POSTGRES_USER=${DB_POSTGRES_USER}
-      - POSTGRES_DB=${DB_POSTGRES_DB}
-    env_file:
-      - ./.env
-    networks:
-      - shop-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   users:
     build: "./users"
+    container_name: users-service
     restart: always
+    environment:
+      - NODE_ENV=dev
+      - DB_POSTGRES_HOST=postgres
+      - DB_POSTGRES_PORT=5432
+      - DB_POSTGRES_PASSWORD=12345678
+      - DB_POSTGRES_USER=root
+      - DB_POSTGRES_DB=shopping_center
+      - RABBITMQ_URLS=amqp://root:12345678@rabbitmq:5672
     depends_on:
-      - rabbitmq
-      - postgres
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - shop-network
 
   gateway:
     build: "./gateway"
+    container_name: gateway-service
     restart: always
     ports:
       - "3000:3000"
+    environment:
+      - NODE_ENV=dev
+      - CLIENTS=localhost:3000
+      - RABBITMQ_URLS=amqp://root:12345678@rabbitmq:5672
     depends_on:
-      - rabbitmq
-      - users
+      users:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     networks:
       - shop-network
 
@@ -64,6 +91,8 @@ volumes:
   rabbitmq-lib:
     driver: local
   rabbitmq-log:
+    driver: local
+  postgres-data:
     driver: local
 
 networks:
